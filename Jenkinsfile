@@ -6,18 +6,19 @@ pipeline {
         disableConcurrentBuilds()
     }
 
+    environment {
+        DOCKERHUB_IMAGE = 'lovehashim/docker-cicd-demo'
+    }
+
     stages {
         stage('Checkout') {
             steps {
-                echo 'Checking out source code from GitHub'
                 checkout scm
             }
         }
 
         stage('Test') {
             steps {
-                echo 'Running automated application tests'
-
                 sh '''
                     docker run --rm \
                       -u "$(id -u):$(id -g)" \
@@ -44,6 +45,36 @@ pipeline {
                       -t docker-cicd-demo:${BUILD_NUMBER} \
                       .
                 '''
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKERHUB_USERNAME',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        echo "$DOCKERHUB_TOKEN" | docker login \
+                          --username "$DOCKERHUB_USERNAME" \
+                          --password-stdin
+
+                        docker tag docker-cicd-demo:${BUILD_NUMBER} \
+                          "$DOCKERHUB_IMAGE:${BUILD_NUMBER}"
+
+                        docker tag docker-cicd-demo:${BUILD_NUMBER} \
+                          "$DOCKERHUB_IMAGE:latest"
+
+                        docker push "$DOCKERHUB_IMAGE:${BUILD_NUMBER}"
+                        docker push "$DOCKERHUB_IMAGE:latest"
+
+                        docker logout
+                    '''
+                }
             }
         }
 
@@ -80,6 +111,10 @@ pipeline {
 
         failure {
             echo 'Pipeline failed. Review the stage logs.'
+        }
+
+        always {
+            sh 'docker logout >/dev/null 2>&1 || true'
         }
     }
 }
