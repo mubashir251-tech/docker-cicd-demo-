@@ -21,10 +21,18 @@ pipeline {
                 sh '''
                     docker run --rm \
                       -u "$(id -u):$(id -g)" \
-                      -v "$WORKSPACE:/app" \
-                      -w /app \
+                      -e HOME=/tmp \
+                      -e npm_config_cache=/tmp/npm-cache \
+                      -v "$WORKSPACE:/src:ro" \
                       node:22-alpine \
-                      sh -c "npm ci --no-audit --no-fund && npm test"
+                      sh -c '
+                        mkdir -p /tmp/project &&
+                        cp /src/package.json /src/package-lock.json \
+                           /src/app.js /src/app.test.js /tmp/project/ &&
+                        cd /tmp/project &&
+                        npm ci --no-audit --no-fund &&
+                        npm test
+                      '
                 '''
             }
         }
