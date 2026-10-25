@@ -48,6 +48,44 @@ pipeline {
             }
         }
 
+        stage('Security Scan') {
+            steps {
+                sh '''
+                    set -eu
+
+                    IMAGE="docker-cicd-demo:${BUILD_NUMBER}"
+                    mkdir -p reports
+
+                    echo "Generating HIGH and CRITICAL vulnerability report"
+
+                    trivy image \
+                      --scanners vuln \
+                      --severity HIGH,CRITICAL \
+                      --format table \
+                      --output reports/trivy-report.txt \
+                      "$IMAGE"
+
+                    trivy image \
+                      --scanners vuln \
+                      --severity HIGH,CRITICAL \
+                      --format json \
+                      --output reports/trivy-report.json \
+                      "$IMAGE"
+
+                    echo "Checking the CRITICAL vulnerability policy"
+
+                    trivy image \
+                      --scanners vuln \
+                      --severity CRITICAL \
+                      --exit-code 1 \
+                      --no-progress \
+                      "$IMAGE"
+
+                    echo "Security gate passed: no CRITICAL findings"
+                '''
+            }
+        }
+
         stage('Push to Docker Hub') {
             steps {
                 withCredentials([
@@ -58,7 +96,9 @@ pipeline {
                     )
                 ]) {
                     sh '''
+                        set -eu
                         set +x
+
                         echo "$DOCKERHUB_TOKEN" | docker login \
                           --username "$DOCKERHUB_USERNAME" \
                           --password-stdin
@@ -81,6 +121,8 @@ pipeline {
         stage('Deploy to Staging') {
             steps {
                 sh '''
+                    set -eu
+
                     docker rm -f docker-cicd-staging 2>/dev/null || true
 
                     docker run -d \
@@ -105,16 +147,21 @@ pipeline {
     }
 
     post {
+        always {
+            archiveArtifacts(
+                artifacts: 'reports/trivy-report.*',
+                allowEmptyArchive: true
+            )
+
+            sh 'docker logout >/dev/null 2>&1 || true'
+        }
+
         success {
             echo 'CI/CD pipeline completed successfully'
         }
 
         failure {
-            echo 'Pipeline failed. Review the stage logs.'
-        }
-
-        always {
-            sh 'docker logout >/dev/null 2>&1 || true'
+            echo 'Pipeline failed. Review the stage logs and security report.'
         }
     }
 }
